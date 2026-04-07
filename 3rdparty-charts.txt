@@ -1,0 +1,83 @@
+
+############################################### Add 3rd part Helm Repository ############################
+
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update 
+*Above downloads the latest list of available charts and their versions, “apt update” or “yum update” — but for Helm charts
+
+#Install Prometheus
+helm install my-prometheus prometheus-community/prometheus \
+  --set server.service.type=NodePort \
+  --set alertmanager.service.type=NodePort \
+  --set nodeExporter.enabled=false
+
+Note: Ignore NodeExporter as there is bug in docker desktop should work well in Cloud.
+
+*prometheus-alertmanager → Handles alert notifications and manages alert routing (email, Slack, etc.).
+*prometheus-kube-state-metrics → Exposes Kubernetes object states (like deployments, pods) as Prometheus metrics.
+*prometheus-prometheus-node-exporter → Collects system-level metrics (CPU, memory, disk) from each node.
+*prometheus-prometheus-pushgateway → Receives metrics from short-lived jobs that can’t be scraped directly.
+*prometheus-server  → Core Prometheus server that scrapes metrics, stores time-series data, and runs alerting rules.
+
+# open http://localhost:<NODE_PORT>/
+Run below PROMQL:
+
+#CPU Usage % per Pod (Based on samples collected over the past 2 minutes)
+sum(rate(container_cpu_usage_seconds_total{namespace="default", pod!=""}[2m])) by (pod) * 100
+#Memory Usage per Pod (in MB)
+sum(container_memory_usage_bytes{namespace="default", pod!=""}) by (pod) / 1024 / 1024
+#Total memory usage (all pods in default ns):
+sum(container_memory_usage_bytes{namespace="default"}) / 1024 / 1024
+#Pod Uptime (in Minutes)
+(time() - kube_pod_start_time{namespace="default"}) / 60
+#Total Running Pod
+count(kube_pod_status_phase{namespace="default", phase="Running"} == 1)
+
+###########################################################################################################
+
+What is Grafana ?
+Grafana is an open-source data visualization and monitoring platform that lets you create interactive dashboards to analyze metrics from various data sources like Prometheus, InfluxDB, Loki, Elasticsearch, and more
+Grafana helps you see and understand your system’s metrics — like CPU, memory, errors, or request rates — in beautiful graphs, charts, and alerts
+
+### Add this Repo locally ####
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo list
+helm repo update
+
+### Create values.yaml #####
+
+# grafana-values.yaml
+adminUser: admin
+adminPassword: admin123
+
+service:
+  type: NodePort
+  port: 80
+  nodePort: 30093  # You can choose a free port
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://my-prometheus-server.default.svc.cluster.local
+        isDefault: true
+
+#### Install Grafana Chart #####
+helm template my-grafana grafana/grafana -f grafana-values.yaml --namespace default
+helm install my-grafana grafana/grafana -f grafana-values.yaml --namespace default
+helm ls
+
+Once logged in:
+Go to Connections → Data sources → Prometheus
+It should already be configured and say “Data source is working”
+
+-- Create your Dashboards via above PROMQLS we learned in Prometheus.
+Or Import JSON - We will explore
+
+### Download in-case you want to see ###
+helm pull grafana/grafana --untar
+
+

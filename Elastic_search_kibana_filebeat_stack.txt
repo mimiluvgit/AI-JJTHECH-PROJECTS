@@ -1,0 +1,222 @@
+####### ELK Stack #######
+
+ELK stands for Elasticsearch, Logstash, and Kibana—a powerful log management and analytics stack.
+Elasticsearch stores the logs making search fast and scalable.
+Logstash collects, processes, transforms, and ships logs from different sources into Elasticsearch.
+Kibana visualizes the logs with dashboards, charts, and search capabilities.
+ELK helps engineers troubleshoot, monitor applications, track errors, and analyze system behavior.
+Widely used for centralized logging, observability, and real-time analytics.
+
+To install a complete ELK stack (Elasticsearch + Logstash + Filebeat) on Docker Desktop Kubernetes, and then connect it to Grafana for log viewing.
+
+1) Add Elastic Helm Repository
+helm repo add elastic https://helm.elastic.co
+helm repo update
+
+
+2) Create a minimal values file:
+
+$ cat es-values.yaml
+replicas: 1
+
+resources:
+  requests:
+    cpu: "500m"
+    memory: "1Gi"
+  limits:
+    cpu: "1"
+    memory: "2Gi"
+
+volumeClaimTemplate:
+  accessModes: [ "ReadWriteOnce" ]
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: hostpath
+
+podAntiAffinity: {}
+
+3) kubectl create namespace elastic-stack
+4) kubectl config set-context --current --namespace=elastic-stack 
+5) helm install elasticsearch elastic/elasticsearch -f es-values.yaml --namespace=elastic-stack
+
+**** Please patch it as this helm chart has some bugs *****
+kubectl patch statefulset elasticsearch-master -n elastic-stack --type='json' -p='[
+  {
+    "op": "remove",
+    "path": "/spec/template/spec/containers/0/readinessProbe"
+  }
+]'
+
+kubectl patch statefulset elasticsearch-master -n elastic-stack --type='json' -p='[
+  {
+    "op": "replace",
+    "path": "/spec/template/spec/containers/0/env/1/value",
+    "value": "elasticsearch-master-0" 
+  },
+  {
+    "op": "replace",
+    "path": "/spec/template/spec/containers/0/env/2/value",
+    "value": "master,data,ingest,ml,remote_cluster_client,transform"
+  }
+]'
+
+
+6) helm ls
+7) kubectl get pods 
+** Wait for 2mins and check the logs **
+8) kubectl port-forward service/elasticsearch-master 9200:9200 --namespace=elastic-stack
+--- Go to new Terminal
+9) kubectl get secret elasticsearch-master-credentials --namespace=elastic-stack -o=jsonpath='{.data.password}' | base64 --decode
+10) curl -k -u elastic:<password> https://localhost:9200/_cluster/health?pretty 
+
+Example:
+$ curl -k -u elastic:b5xMxXeFb5gv6mb4 https://localhost:9200/_cluster/health?pretty
+{
+  "cluster_name" : "elasticsearch",
+  "status" : "green",
+  "timed_out" : false,
+  "number_of_nodes" : 1,
+  "number_of_data_nodes" : 1,
+  "active_primary_shards" : 1,
+  "active_shards" : 1,
+  "relocating_shards" : 0,
+  "initializing_shards" : 0,
+  "unassigned_shards" : 0,
+  "delayed_unassigned_shards" : 0,
+  "number_of_pending_tasks" : 0,
+  "number_of_in_flight_fetch" : 0,
+  "task_max_waiting_in_queue_millis" : 0,
+  "active_shards_percent_as_number" : 100.0
+}
+
+
+Congratulations !! If status is green, which means the pod is running and ready. 
+Now we can proceed with kibana and filebeat for log visualization.
+
+
+11) helm install kibana elastic/kibana -n elastic-stack --set resources.requests.cpu=200m --set resources.requests.memory=256Mi
+12) Patch the bug:
+kubectl patch deployment kibana-kibana -n elastic-stack \
+  --type=json \
+  -p='[{"op": "remove", "path": "/spec/template/spec/containers/0/readinessProbe"}]'
+
+kubectl logs <POD_NAME> -- wait for it to come online ~ 2 mins
+
+13) kubectl port-forward service/kibana-kibana 5601:5601 -n elastic-stack
+From different Terminal:
+14) kubectl get secrets --namespace=elastic-stack elasticsearch-master-credentials -ojsonpath='{.data.password}' | base64 -d
+15) Open http://localhost:5601 ( login with username: elastic and password: <base64_decoded_password> from above)
+
+###### If you are able to open Browser and login it means all worked till here ######
+
+Please proceed for Installing filebeat using helm --- (check your password else it wont work)
+
+#filebeat.yaml
+
+daemonset:
+  enabled: true
+
+deployment:
+  enabled: false
+
+filebeatConfig:
+  filebeat.yml: |
+    filebeat.inputs:
+      - type: container
+        enabled: true
+        paths:
+          - /var/log/containers/*.log
+        processors:
+          - add_kubernetes_metadata:
+              host: ${NODE_NAME}
+              matchers:
+                - logs_path:
+                    logs_path: "/var/log/containers/"
+
+    output.elasticsearch:
+      hosts: ["https://elasticsearch-master:9200"]
+      username: "elastic"
+      password: "Y5DjZgQbK8GIyGfu"
+      ssl:
+        certificate_authorities: ["/usr/share/filebeat/elastic-ca.crt"]
+
+extraVolumes:
+  - name: elastic-ca
+    secret:
+      secretName: elasticsearch-master-certs
+      items:
+        - key: ca.crt
+          path: elastic-ca.crt
+
+extraVolumeMounts:
+  - name: elastic-ca
+    mountPath: /usr/share/filebeat/elastic-ca.crt
+    subPath: elastic-ca.crt
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 200Mi
+  limits:
+    cpu: 200m
+    memory: 300Mi
+
+16) helm install filebeat elastic/filebeat -n elastic-stack -f filebeat.yaml
+
+kubectl patch daemonset filebeat-filebeat -n elastic-stack --type='json' \
+  -p='[{"op": "remove", "path": "/spec/template/spec/containers/0/readinessProbe"}]'
+
+Note: Wait for 2 mins here and see the logs of Filebeat
+
+17) kubectl exec -n elastic-stack -it <filebeat_POD_NAME> -- curl -ks -u elastic:<password> https://elasticsearch-master:9200/_cat/indices?v
+
+*** You should see some output as below:
+
+health status index                                uuid                   pri rep docs.count docs.deleted store.size pri.store.size
+yellow open   .ds-filebeat-8.5.1-2025.11.16-000001 dafaUMWBQ4m_WeUKYxHoQw   1   1       2410            0    906.2kb        906.2kb
+
+Note: This confirms that our filebeat can reach elasticsearch cluster.
+
+-- Good Work till here ---
+
+#################### Validation Part Now #####################
+
+#pod.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: log-generator
+  namespace: elastic-stack
+  labels:
+    app: log-generator
+spec:
+  containers:
+  - name: logger
+    image: busybox
+    command: ["/bin/sh"]
+    args:
+      - "-c"
+      - "while true; do echo \"Hello From Pod $(date)\"; sleep 1; done"
+
+18) kubectl apply -f pod.yaml
+19) kubectl logs log-generator --namespace=elastic-stack -f 
+20) kubectl port-forward service/kibana-kibana 5601:5601 -n elastic-stack
+21) Create a Data View: Kibana → Stack Management → Data Views
+Data Views (Name: filebeat-*, Value: filebeat-*, time field: @timestamp)
+Check in Discover: Discover → choose our filebeat-* data view.
+
+eg KQL:
+message : "Hello From Pod"
+kubernetes.namespace : "elastic-stack"
+kubernetes.pod.name : "elasticsearch-master-0"
+
+Note: Change the time range to get real time values
+
+Your setup flows from Pod → Filebeat → Elasticsearch → Kibana
+
+Bonus: Try adding some dashboards 
+
+Conclusion: Using Helm charts, DaemonSets, and proper resource planning, we can quickly set up a scalable logging pipeline. 
+This setup gives real-time insights into our applications, making monitoring and troubleshooting much easier.

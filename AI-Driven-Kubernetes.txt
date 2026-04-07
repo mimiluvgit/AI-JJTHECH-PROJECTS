@@ -1,0 +1,44 @@
+##### npm #####
+
+npm (Node Package Manager) → A command-line tool that installs Node.js libraries (called packages).
+Instead of writing everything from scratch, you can just install these ready-made packages using npm
+
+
+#### Installation #######
+
+Install from here : https://nodejs.org/dist/v24.11.0/node-v24.11.0-x64.msi
+Verify installation:
+node -v
+npm -v 
+npm install -g mcp-server-Kubernetes
+mcp-server-kubernetes --version (Stop this as this will be taken care by Claude)
+
+##### Configure Claude Desktop ######
+
+Install from below link:
+https://claude.ai/redirect/claudedotcom.v1.6e6db48a-e976-4c4a-8602-d6130ccdac13/api/desktop/win32/x64/exe/latest/redirect
+
+open Setting -> Developer -> Edit Config and below file content
+
+Make sure your file is as below:
+$ cat /c/Users/Admin/AppData/Roaming/Claude/claude_desktop_config.json
+{
+  "mcpServers": {
+    "kubernetes": {
+      "command": "npx",
+      "args": ["mcp-server-kubernetes"]
+    }
+  }
+}
+
+
+##### Test the Integration #####
+
+Start a new conversation with Claude in Claude Desktop
+Ask Claude to interact with your Kubernetes cluster with a simple command like:
+
+“List all pods in my default namespace”
+“Show me the current deployments”
+“Get the status of my services”
+
+Explore Tooling sections as well and try to disable and enable few of them.

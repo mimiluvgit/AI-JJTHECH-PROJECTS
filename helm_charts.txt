@@ -1,0 +1,145 @@
+#### What is HElM Charts ? #####
+
+Helm Charts are packages of pre-configured Kubernetes resources that make it easy to deploy, manage, and version applications on Kubernetes.
+
+A Helm chart contains templates (YAML manifests) and configuration files that describe a Kubernetes application, similar to how apt or yum packages manage software on Linux.
+
+#### Advantages of Helm Charts ######
+
+Simplified Deployment: Deploy complex applications with a single command (helm install).
+Reusability: Charts can be reused across environments (dev, test, prod) by just changing values.
+Version Control: Charts are versioned, making rollbacks easy (helm rollback).
+Configuration Management: Override defaults easily using custom values.yaml or --set flags.
+Dependency Management: Manage multi-service apps (like WordPress + MySQL) via dependent charts.
+Community Ecosystem: Huge repository of prebuilt charts available in the Artifact Hub
+Consistent Deployments: Ensures the same manifest and configuration are applied across clusters.
+
+#### Key Components #####
+
+Chart.yaml – contains metadata about the chart (name, version, description).
+values.yaml – defines default configuration values (you can override these).
+templates/ – contains Kubernetes YAML templates (e.g., Deployment, Service, Ingress).
+charts/ – may include dependent charts (for multi-component apps).
+
+
+################ Installation #######################################
+Install helm from https://get.helm.sh/helm-v4.0.0-beta.2-windows-amd64.zip
+mkdir -p ~/bin
+mv ~/Downloads/helm-v4.0.0-beta.2-windows-amd64/windows-amd64 ~/bin/
+cd ~/bin/
+ls -lrth
+-- kubectl.exe*
+-- helm.exe*
+
+echo 'export PATH=$PATH:$HOME/bin' >> ~/.bashrc
+source ~/.bashrc
+
+helm version - To verify installation
+helm ls
+
+############### Creating your own Chart ##############################
+
+#mkdir helm_demo
+#helm create nginx-chart
+
+nginx-chart/
+├── Chart.yaml       #  Main metadata file — defines chart name, version, description, and app version
+├── values.yaml      #  Default configuration values (image, ports, replicas, etc.)
+├── charts/          #  Folder to store any dependent or sub-charts (optional, often empty)
+├── templates/       #  Kubernetes YAML templates that use Helm variables (Deployment, Service, etc.)
+└── .helmignore      #  File listing patterns to ignore when packaging the chart (like .gitignore)
+
+************ Edit values.yaml and replace with below values ******
+
+replicaCount: 1
+
+image:
+  repository: nginx
+  tag: "1.25.3"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+********* Edit service.yaml with below YAML:
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nginx-chart.fullname" . }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: {{ include "nginx-chart.name" . }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: 80
+
+******* Edit deployment.yaml th below YAML:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nginx-chart.fullname" . }}
+  labels:
+    app: {{ include "nginx-chart.name" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "nginx-chart.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "nginx-chart.name" . }}
+    spec:
+      containers:
+        - name: nginx
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          ports:
+            - containerPort: 80
+
+*** Some Cleanups as not needed for now
+
+rm nginx-chart/templates/tests;
+rm nginx-chart/templates/ingress.yaml;
+rm nginx-chart/templates/hpa.yaml;
+rm nginx-chart/templates/serviceaccount.yaml;
+rm nginx-chart/templates/httproute.yaml;
+rm nginx-chart/templates/NOTES.txt;
+
+### Install the Chart ###
+
+helm install my-nginx ./nginx-chart
+helm ls
+kubectl get pods
+kubectl get svc
+kubectl port-forward svc/my-nginx-nginx-chart 8080:80
+
+*Open http://localhost:8080 in browser
+
+### Verify your chart
+helm lint nginx-chart
+
+### Package your chart
+helm package nginx-chart
+
+## Upgrade and Rollbacks
+
+Edit values.yaml and change replica to 2
+helm upgrade my-nginx ./nginx-chart
+helm ls
+helm upgrade my-nginx ./nginx-chart --set replicaCount=3 
+helm history my-nginx
+helm rollback my-nginx 1
+kubectl get pods
+
+### Uninstall the Chart
+
+helm uninstall my-nginx  (It will remove all the components that was deployed via Chart)

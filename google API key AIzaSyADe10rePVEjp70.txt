@@ -1,0 +1,5 @@
+google API key: AIzaSyADe10rePVEjp70XBVIm1wrj5WoEre1yuA
+
+new key = AIzaSyAjd8zCgxzvOQyLJ-7KlDTCHmv8CbjgPGg
+
+TMDB_ACCESS_TOKEN=8ef17023df3bc37fff3aa2f5fd9b4986
